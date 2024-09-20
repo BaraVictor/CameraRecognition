@@ -47,6 +47,9 @@ public class Main {
     Scalar lowerYellow = new Scalar(20, 100, 100);
     Scalar upperYellow = new Scalar(30, 255, 255);
 
+    Scalar lowerRed = new Scalar(0, 125, 25);
+    Scalar upperRed = new Scalar(20, 255, 255);
+
 
     while (capture.read(matFrame)) {
       // Convert the frame to HSV color space
