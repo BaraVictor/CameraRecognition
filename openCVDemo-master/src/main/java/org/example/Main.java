@@ -1,12 +1,12 @@
 package org.example;
 
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.videoio.VideoCapture;
 
 import javax.swing.*;
-
-import java.awt.BorderLayout;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.util.ArrayList;
@@ -18,23 +18,24 @@ public class Main {
     System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
   }
 
-  public static void main(String[] args) {
-    System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+  // Dimensiunile obiectului galben de referință în cm (8.9 cm înălțime și 3.8 cm lățime)
+  private static final double OBJECT_WIDTH_CM = 3.8;  // Lățimea cunoscută a dreptunghiului galben
+  private static final double FOCAL_LENGTH = 700.0;   // Lungimea focală calibrată pentru camera ta
 
-    // Open webcam
-    VideoCapture capture = new VideoCapture(0); // Use index 0 for default camera
+  public static void main(String[] args) {
+    VideoCapture capture = new VideoCapture(0); // Folosește camera implicită (index 0)
 
     if (!capture.isOpened()) {
       System.out.println("Error: Cannot open video capture.");
       return;
     }
 
-    // Set up JFrame to display video
-    JFrame frame = new JFrame("Rectangle Detection with Angle");
+    // Setare fereastră pentru afișarea videoclipului
+    JFrame frame = new JFrame("Yellow Rectangle Detection and Distance");
     frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
     JLabel label = new JLabel();
     frame.getContentPane().add(label, BorderLayout.CENTER);
-    frame.setSize(1280, 720); // Increase window size for better visibility
+    frame.setSize(1280, 720); // Dimensiunea ferestrei
     frame.setVisible(true);
 
     Mat matFrame = new Mat();
@@ -43,123 +44,101 @@ public class Main {
     Mat blurred = new Mat();
     Mat edged = new Mat();
 
-    // Adjust HSV range for yellow color
+    // Interval HSV pentru culoarea galbenă (ajustat pentru dreptunghiul galben)
     Scalar lowerYellow = new Scalar(20, 100, 100);
     Scalar upperYellow = new Scalar(30, 255, 255);
 
-    Scalar lowerRed = new Scalar(0, 125, 25);
-    Scalar upperRed = new Scalar(20, 255, 255);
-
+    Rect lastRectangle = null;
+    double lastDistance = 0;
 
     while (capture.read(matFrame)) {
-      // Convert the frame to HSV color space
+      // Conversie în spațiul de culoare HSV
       Imgproc.cvtColor(matFrame, hsvFrame, Imgproc.COLOR_BGR2HSV);
 
-      // Create a mask for the yellow color
+      // Masca pentru culoarea galbenă
       Core.inRange(hsvFrame, lowerYellow, upperYellow, mask);
 
-
-      // Apply Gaussian blur to reduce noise
+      // Aplicați Gaussian Blur pentru a reduce zgomotul
       Imgproc.GaussianBlur(mask, blurred, new Size(5, 5), 0);
 
-      // Apply Canny edge detection
+      // Aplicați detectarea marginilor Canny
       Imgproc.Canny(blurred, edged, 50, 150);
 
-      // Find contours in the edge-detected image
+      // Găsiți contururile
       List<MatOfPoint> contours = new ArrayList<>();
       Mat hierarchy = new Mat();
       Imgproc.findContours(edged, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
 
       boolean rectangleFound = false;
 
-      // Loop over the contours to find rectangles
       for (MatOfPoint contour : contours) {
         MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
         double perimeter = Imgproc.arcLength(contour2f, true);
         MatOfPoint2f approx = new MatOfPoint2f();
         Imgproc.approxPolyDP(contour2f, approx, 0.02 * perimeter, true);
 
-        // If the contour has 4 vertices, it's likely a rectangle
-        if (approx.total() == 4) {
-          // Get bounding rectangle
+        if (approx.total() == 4) {  // Detectăm dreptunghiuri
           Rect rect = Imgproc.boundingRect(new MatOfPoint(approx.toArray()));
 
-          // Filter out small rectangles to ignore noise
-          if (rect.width > 30 && rect.height > 30) {
-            // Draw the rectangle on the original frame
+          if (rect.width > 30 && rect.height > 30) {  // Filtrare pentru zgomot (dimensiuni minime)
             Imgproc.rectangle(matFrame, new Point(rect.x, rect.y),
-                    new Point(rect.x + rect.width, rect.y + rect.height),
-                    new Scalar(0, 255, 0), 2);
+                new Point(rect.x + rect.width, rect.y + rect.height),
+                new Scalar(0, 255, 0), 2);
 
-            // Calculate angle
-            double[] cosines = new double[4];
-            double[] sines = new double[4];
-            double angle = 0;
+            // Calcularea distanței pe baza lățimii detectate și dimensiunii cunoscute
+            double distance = (OBJECT_WIDTH_CM * FOCAL_LENGTH) / rect.width;
 
-            // Get the four points of the rectangle
-            Point[] points = new Point[4];
-            points[0] = new Point(rect.x, rect.y);
-            points[1] = new Point(rect.x + rect.width, rect.y);
-            points[2] = new Point(rect.x + rect.width, rect.y + rect.height);
-            points[3] = new Point(rect.x, rect.y + rect.height);
+            lastRectangle = rect;
+            lastDistance = distance;
 
-            // Calculate the angle between the first and third point
-            double dx = points[2].x - points[0].x;
-            double dy = points[2].y - points[0].y;
-            angle = Math.atan2(dy, dx) * (180 / Math.PI);
-
-            // Normalize angle between 0 and 180 degrees
-            if (angle < 0) angle += 180;
-
-            // Draw lines for the corners and center
-            for (int i = 0; i < points.length; i++) {
-              Imgproc.line(matFrame, points[i], new Point(rect.x + rect.width / 2, rect.y + rect.height / 2),
-                      new Scalar(255, 0, 0), 1);
-              Imgproc.circle(matFrame, points[i], 5, new Scalar(255, 0, 0), -1);
-            }
-
-            // Label the detected rectangle and angle
-            Imgproc.putText(matFrame, "Angle: " + String.format("%.2f", angle) + " degrees",
-                    new Point(10, 30), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0), 2);
             rectangleFound = true;
-            break; // Only process one rectangle
+            break;  // Procesăm doar un dreptunghi
           }
         }
       }
 
-      if (!rectangleFound) {
+      if (rectangleFound) {
+        // Afișează distanța pentru dreptunghiul detectat
+        Imgproc.putText(matFrame, "Distance: " + String.format("%.2f", lastDistance) + " cm",
+            new Point(10, 30), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0), 2);
+      } else if (lastRectangle != null) {
+        Imgproc.rectangle(matFrame, new Point(lastRectangle.x, lastRectangle.y),
+            new Point(lastRectangle.x + lastRectangle.width, lastRectangle.y + lastRectangle.height),
+            new Scalar(0, 255, 0), 2);
+
+        Imgproc.putText(matFrame, "Distance: " + String.format("%.2f", lastDistance) + " cm (Last)",
+            new Point(10, 30), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0), 2);
+      } else {
         Imgproc.putText(matFrame, "No Yellow Rectangle Detected",
-                new Point(10, 30), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 0, 255), 2);
+            new Point(10, 30), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 0, 255), 2);
       }
 
-      // Convert Mat to BufferedImage for display
+      // Conversie Mat la BufferedImage pentru afișare
       BufferedImage img = matToBufferedImage(matFrame);
       label.setIcon(new ImageIcon(img));
 
-      // Add a slight delay to mimic real-time video
       try {
-        Thread.sleep(33);  // ~30 FPS
+        Thread.sleep(33);  // Aproximativ 30 FPS
       } catch (InterruptedException e) {
         e.printStackTrace();
       }
 
-      // Exit condition: close the window
       if (!frame.isVisible()) {
         break;
       }
     }
 
-    // Release resources
+    // Eliberarea resurselor
     capture.release();
     frame.dispose();
   }
 
-  // Utility function to convert Mat to BufferedImage for displaying in JFrame
+  // Funcție utilitară pentru conversia Mat în BufferedImage
   public static BufferedImage matToBufferedImage(Mat mat) {
     int type = (mat.channels() == 1) ? BufferedImage.TYPE_BYTE_GRAY : BufferedImage.TYPE_3BYTE_BGR;
     BufferedImage image = new BufferedImage(mat.width(), mat.height(), type);
     byte[] data = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
-    mat.get(0, 0, data); // Copy data from Mat to BufferedImage
+    mat.get(0, 0, data);  // Copierea datelor din Mat în BufferedImage
     return image;
   }
 }
