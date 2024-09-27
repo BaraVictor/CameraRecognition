@@ -21,10 +21,6 @@ public class Main {
   private static final double OBJECT_WIDTH_CM = 3.8;  // Width of the known rectangle in cm
   private static final double FOCAL_LENGTH = 700.0;   // Focal length calibrated for your camera
 
-  private static String angleText = "";
-  private static String distanceText = "";
-  private static long lastUpdateTime = 0;
-
   public static void main(String[] args) {
     VideoCapture capture = new VideoCapture(0); // Use the default camera (index 0)
 
@@ -34,7 +30,7 @@ public class Main {
     }
 
     // Set up window to display video
-    JFrame frame = new JFrame("Yellow Rectangle Detection and Distance");
+    JFrame frame = new JFrame("Yellow Rectangle Detection in HSV");
     frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
     JLabel label = new JLabel();
     frame.getContentPane().add(label, BorderLayout.CENTER);
@@ -44,30 +40,33 @@ public class Main {
     Mat matFrame = new Mat();
     Mat hsvFrame = new Mat();
     Mat mask = new Mat();
-    Mat blurred = new Mat();
-    Mat edged = new Mat();
+    Mat coloredResult = new Mat(); // Mat for result
 
     // HSV range for yellow color
-    Scalar lowerYellow = new Scalar(20, 100, 100);
+    Scalar lowerYellow = new Scalar(15, 100, 100);
     Scalar upperYellow = new Scalar(30, 255, 255);
 
+
+
     while (capture.read(matFrame)) {
+
       // Convert to HSV color space
       Imgproc.cvtColor(matFrame, hsvFrame, Imgproc.COLOR_BGR2HSV);
 
       // Create mask for yellow color
       Core.inRange(hsvFrame, lowerYellow, upperYellow, mask);
+      /*
+       * Mat result = new Mat(matFrame.size(), matFrame.type(), new Scalar(70, 70, 70));
+       *
+       */
 
-      // Apply Gaussian Blur
-      Imgproc.GaussianBlur(mask, blurred, new Size(5, 5), 0);
+      // Keep only the yellow areas in the original frame
+      Core.bitwise_and(matFrame, matFrame, coloredResult, mask); // Apply the mask to keep only the yellow areas
 
-      // Apply Canny edge detection
-      Imgproc.Canny(blurred, edged, 50, 150);
-
-      // Find contours
+      // Draw the contours and calculate angle and distance
       List<MatOfPoint> contours = new ArrayList<>();
       Mat hierarchy = new Mat();
-      Imgproc.findContours(edged, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
+      Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
 
       boolean rectangleFound = false;
 
@@ -80,7 +79,7 @@ public class Main {
 
         // Check if the rectangle is valid (minimum dimensions)
         if (rectSize.width > 30 && rectSize.height > 30) {
-          // Draw the rotated rectangle
+          // Draw the rotated rectangle on the original frame for visualization
           Point[] vertices = new Point[4];
           rotatedRect.points(vertices);
           for (int i = 0; i < 4; i++) {
@@ -90,31 +89,22 @@ public class Main {
           // Calculate distance
           double distance = (OBJECT_WIDTH_CM * FOCAL_LENGTH) / rectSize.width;
 
-          // Update texts and reset timer
-          angleText = "Angle: " + String.format("%.2f", angle) + " degrees";
-          distanceText = "Distance: " + String.format("%.2f", distance) + " cm";
-          lastUpdateTime = System.currentTimeMillis();
+          // Display angle and distance above the rectangle
+          String angleText = "Angle: " + String.format("%.2f", angle) + " degrees";
+          String distanceText = "Distance: " + String.format("%.2f", distance) + " cm";
 
-          rectangleFound = true;
-          break; // Process only one rectangle
+          // Use a position for the text just above the rectangle
+          Point textPosition = new Point(vertices[0].x, vertices[0].y - 10);
+          Imgproc.putText(matFrame, angleText, textPosition, Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(0, 255, 0), 1);
+          Imgproc.putText(matFrame, distanceText, new Point(textPosition.x, textPosition.y - 15), Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(0, 255, 0), 1);
+
+          rectangleFound = true; // Mark that at least one rectangle was found
         }
       }
 
       if (!rectangleFound) {
-        angleText = "";
-        distanceText = "No Yellow Rectangle Detected";
-      }
-
-      // Display angle and distance if within the delay time
-      long currentTime = System.currentTimeMillis();
-      if (currentTime - lastUpdateTime <= 1000) { // Show for 1 second
-        Imgproc.putText(matFrame, angleText, new Point(10, 50),
-                Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(0, 255, 0), 1);
-        Imgproc.putText(matFrame, distanceText, new Point(10, 30),
-                Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(0, 255, 0), 1);
-      } else {
-        angleText = "";
-        distanceText = "";
+        Imgproc.putText(matFrame, "No Yellow Rectangle Detected", new Point(10, 30),
+                Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(0, 0, 255), 1); // Red color for no detection
       }
 
       // Convert Mat to BufferedImage for display
